@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Teach Assist - Mobile App Demo</title>
+<style>
+:root{
+  --blue:#0b79c1; --blue-dark:#0a5f99; --bg:#f4f9fc; --card:#fff; --muted:#6b7280;
+  font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:#072135;-webkit-font-smoothing:antialiased}
+.app{max-width:480px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;border-left:1px solid rgba(0,0,0,0.02);border-right:1px solid rgba(0,0,0,0.02);background:linear-gradient(180deg,var(--bg),#eef6fb)}
+.header{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:linear-gradient(90deg,var(--blue),var(--blue-dark));color:white}
+.brand{display:flex;gap:10px;align-items:center}
+.logo{width:40px;height:40px;border-radius:8px;background:white;color:var(--blue);display:grid;place-items:center;font-weight:700}
+.h-title{font-weight:700;font-size:16px}
+.h-sub{font-size:12px;opacity:0.9}
+.content{flex:1;padding:12px;overflow:auto}
+.card{background:var(--card);padding:12px;border-radius:10px;box-shadow:0 6px 18px rgba(11,119,193,0.06);margin-bottom:12px}
+.bottom-nav{display:flex;gap:8px;padding:8px;background:transparent;align-items:center;justify-content:space-around;border-top:1px solid rgba(0,0,0,0.05)}
+.nav-btn{flex:1;text-align:center;padding:8px;border-radius:10px;color:var(--muted);font-weight:600;background:transparent;border:none}
+.nav-btn.active{background:linear-gradient(180deg,rgba(11,119,193,0.12),rgba(11,119,193,0.06));color:var(--blue);box-shadow:0 4px 10px rgba(11,119,193,0.06)}
+table{width:100%;border-collapse:collapse}
+th,td{padding:8px;border-bottom:1px solid #eef6f9;text-align:left}
+th{background:rgba(11,119,193,0.06);color:var(--blue)}
+.input,.small-input{width:100%;padding:9px;border-radius:8px;border:1px solid #e6f0f7;background:white}
+.small-input{width:120px;display:inline-block}
+.row{display:flex;gap:8px}
+.small{font-size:0.9rem;color:var(--muted)}
+.center{display:flex;align-items:center;justify-content:center}
+.btn{background:var(--blue);color:white;padding:9px;border-radius:8px;border:none;cursor:pointer}
+.footer{margin:18px auto;text-align:center;color:var(--muted);font-size:0.9rem;padding-bottom:30px}
+.note{font-size:0.86rem;color:var(--muted)}
+.lock{background:#ffe; border-left:4px solid #ffc107; padding:8px;border-radius:6px}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <div class="header">
+    <div class="brand">
+      <div class="logo">TA</div>
+      <div>
+        <div class="h-title" id="appTitle">Teach Assist</div>
+        <div class="h-sub">Teacher's Assistant (Demo)</div>
+      </div>
+    </div>
+    <div id="userArea" class="center small"></div>
+  </div>
+
+  <div class="content" id="content">
+    <!-- content injected -->
+  </div>
+
+  <div class="bottom-nav" id="bottomNav" style="display:none">
+    <button class="nav-btn active" data-view="dashboard">Dashboard</button>
+    <button class="nav-btn" data-view="attendance">Attendance</button>
+    <button class="nav-btn" data-view="homework">Homework</button>
+    <button class="nav-btn" data-view="students">Students</button>
+  </div>
+
+</div>
+<script>
+/* Teach Assist - Single File App with local hashed login (Web Crypto SHA-256)
+   - Accounts saved in localStorage as {username, salt, hash}
+   - Protected views require login; signup allowed.
+   - To reset accounts: localStorage.removeItem('ta_accounts')
+*/
+
+/* Storage helpers */
+const load = (k,d)=>{ try{ return JSON.parse(localStorage.getItem(k))||d }catch(e){return d} }
+const save = (k,v)=> localStorage.setItem(k, JSON.stringify(v))
+
+/* crypto: SHA-256 helper returns hex */
+async function sha256hex(str, salt=''){
+  const enc = new TextEncoder();
+  const data = enc.encode(str + salt);
+  const hash = await crypto.subtle.digest('SHA-256', data);
+  const arr = Array.from(new Uint8Array(hash));
+  return arr.map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+
+/* account helpers */
+let accounts = load('ta_accounts', []); // [{user, salt, hash}]
+function findAccount(user){ return accounts.find(a=>a.user===user) }
+
+/* demo: create default teacher account if none */
+(async()=>{
+  if(accounts.length===0){
+    const demoUser = 'teacher';
+    const demoPass = '12345678'; // as requested earlier
+    const salt = Math.random().toString(36).slice(2,10);
+    const h = await sha256hex(demoPass, salt);
+    accounts.push({user:demoUser, salt, hash:h});
+    save('ta_accounts', accounts);
+  }
+})();
+
+/* APP DATA */
+let students = load('ss_students', [{name:'Aman',roll:'1'},{name:'Riya',roll:'2'},{name:'Vivek',roll:'3'}]);
+let attendance = load('ss_attendance', {});
+let homework = load('ss_homework', []);
+let loggedUser = load('ta_session', null); // {user}
+
+/* UI helpers */
+const content = document.getElementById('content');
+const bottomNav = document.getElementById('bottomNav');
+const userArea = document.getElementById('userArea');
+
+function showLoginArea(){
+  if(loggedUser){
+    userArea.innerHTML = `<span class="small">Hello, <strong>${loggedUser.user}</strong></span> &nbsp; <button class="btn" onclick="logout()" style="padding:6px 8px">Logout</button>`;
+    bottomNav.style.display = '';
+    document.getElementById('bottomNav').querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
+    document.querySelectorAll('.nav-btn')[0].classList.add('active');
+  } else {
+    userArea.innerHTML = `<button class="btn" onclick="renderLogin()">Login</button> <button class="btn" style="background:#6b7280" onclick="renderSignup()">Signup</button>`;
+    bottomNav.style.display = 'none';
+  }
+}
+
+/* routing & nav */
+document.getElementById('bottomNav').addEventListener('click',(e)=>{
+  const b = e.target.closest('button[data-view]'); if(!b) return;
+  document.querySelectorAll('.nav-btn').forEach(x=>x.classList.remove('active')); b.classList.add('active');
+  showView(b.dataset.view);
+});
+
+function requireAuth(){ return !!loggedUser }
+
+/* views */
+function renderInitial(){
+  if(requireAuth()) showView('dashboard'); else renderLogin();
+  showLoginArea();
+}
+
+function renderLogin(msg=''){
+  content.innerHTML = `
+    <div class="card">
+      <h2>Login</h2>
+      <p class="small">Use your account. Default demo: <strong>teacher / 12345678</strong></p>
+      <div style="margin-top:8px"><input id="liUser" class="input" placeholder="Username"></div>
+      <div style="margin-top:8px"><input id="liPass" class="input" placeholder="Password" type="password"></div>
+      <div style="margin-top:10px;display:flex;gap:8px"><button class="btn" id="liBtn">Login</button><button class="btn" style="background:#6b7280" onclick="renderSignup()">Signup</button></div>
+      <div class="note" id="liMsg">${msg}</div>
+    </div>
+  `;
+  document.getElementById('liBtn').onclick = async ()=>{
+    const u = document.getElementById('liUser').value.trim();
+    const p = document.getElementById('liPass').value;
+    if(!u||!p){ document.getElementById('liMsg').innerText='Enter username and password'; return; }
+    const acc = findAccount(u);
+    if(!acc){ document.getElementById('liMsg').innerText='Account not found. Please signup.'; return; }
+    const h = await sha256hex(p, acc.salt);
+    if(h === acc.hash){
+      loggedUser = {user:u}; save('ta_session', loggedUser);
+      showLoginArea(); showView('dashboard'); alert('Login success');
+    } else {
+      document.getElementById('liMsg').innerText='Invalid credentials';
+    }
+  };
+}
+
+function renderSignup(){
+  content.innerHTML = `
+    <div class="card">
+      <h2>Signup</h2>
+      <div class="small">Create teacher account (stored on this device)</div>
+      <div style="margin-top:8px"><input id="suUser" class="input" placeholder="Choose username"></div>
+      <div style="margin-top:8px"><input id="suPass" class="input" placeholder="Choose password" type="password"></div>
+      <div style="margin-top:8px"><input id="suPass2" class="input" placeholder="Confirm password" type="password"></div>
+      <div style="margin-top:10px;display:flex;gap:8px"><button class="btn" id="suBtn">Create</button> <button class="btn" style="background:#6b7280" onclick="renderLogin()">Back</button></div>
+      <div class="note" id="suMsg"></div>
+    </div>
+  `;
+  document.getElementById('suBtn').onclick = async ()=>{
+    const u = document.getElementById('suUser').value.trim();
+    const p = document.getElementById('suPass').value;
+    const p2 = document.getElementById('suPass2').value;
+    if(!u||!p){ document.getElementById('suMsg').innerText='Enter username & password'; return; }
+    if(p !== p2){ document.getElementById('suMsg').innerText='Passwords do not match'; return; }
+    if(findAccount(u)){ document.getElementById('suMsg').innerText='Username taken'; return; }
+    const salt = Math.random().toString(36).slice(2,10);
+    const h = await sha256hex(p, salt);
+    accounts.push({user:u, salt, hash:h}); save('ta_accounts', accounts);
+    loggedUser = {user:u}; save('ta_session', loggedUser);
+    showLoginArea(); showView('dashboard'); alert('Account created & logged in');
+  };
+}
+
+/* Protected main views */
+function showView(view){
+  if(!requireAuth()){ renderLogin('Please login to access the app'); return; }
+  if(view==='dashboard') renderDashboard();
+  if(view==='attendance') renderAttendance();
+  if(view==='homework') renderHomework();
+  if(view==='students') renderStudents();
+}
+
+/* Dashboard */
+function renderDashboard(){
+  content.innerHTML = '';
+  const card = document.createElement('div'); card.className='card';
+  const total = students.length;
+  const dates = Object.keys(attendance).sort();
+  let percent = '—';
+  if(dates.length){
+    const rec = attendance[dates[dates.length-1]];
+    const present = Object.values(rec).filter(v=>v==='present').length;
+    percent = Math.round((present/total)*100) + '%';
+  }
+  card.innerHTML = `
+    <h2>Dashboard</h2>
+    <p class="small">Quick summary — data stored on this device.</p>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <div style="flex:1;background:linear-gradient(180deg,#fbfeff,#f3fbff);padding:12px;border-radius:10px"><div class="small">Attendance</div><div style="font-weight:700;font-size:18px;margin-top:6px">${percent}</div></div>
+      <div style="flex:1;background:linear-gradient(180deg,#fbfeff,#fff9f3);padding:12px;border-radius:10px"><div class="small">Pending HW</div><div style="font-weight:700;font-size:18px;margin-top:6px">${homework.length}</div></div>
+      <div style="flex:1;background:linear-gradient(180deg,#fbfeff,#f3fff7);padding:12px;border-radius:10px"><div class="small">Students</div><div style="font-weight:700;font-size:18px;margin-top:6px">${total}</div></div>
+    </div>
+    <div style="margin-top:12px" id="dashNotice"></div>
+  `;
+  content.appendChild(card);
+  const notice = document.getElementById('dashNotice');
+  notice.innerHTML = `<div class="card"><strong>Recent Homework</strong><div class="small" style="margin-top:8px">${homework.slice(-3).reverse().map(h=>h.title+' '+(h.due?'- '+h.due:'')) .join('<br>') || 'No homework'}</div></div>`;
+}
+
+/* Attendance */
+function renderAttendance(){
+  content.innerHTML = `<div class="card"><h2>Attendance</h2><p class="small">Tap Present/Absent. Save to store today's record.</p>
+    <table><thead><tr><th>Name</th><th>Roll</th><th>Status</th></tr></thead><tbody id="attBody"></tbody></table>
+    <div style="display:flex;gap:8px;margin-top:10px"><button class="btn" id="saveAtt">Save</button><button class="btn" id="clearAtt" style="background:#999">Clear</button><button class="btn" id="exportCSV" style="background:#444">Export CSV</button></div></div>`;
+  const tbody = document.getElementById('attBody'); tbody.innerHTML='';
+  students.forEach(s=>{
+    const tr=document.createElement('tr'); const date = new Date().toISOString().slice(0,10);
+    const status = (attendance[date]||{})[s.roll] || '';
+    tr.innerHTML = `<td>${s.name}</td><td>${s.roll}</td><td><button class="btn" onclick="mark('${s.roll}','present')">Present</button> <button class="btn" style="background:#ccc;color:#222" onclick="mark('${s.roll}','absent')">Absent</button> <span style="margin-left:8px;color:var(--muted)">${status}</span></td>`;
+    tbody.appendChild(tr);
+  });
+  document.getElementById('saveAtt').onclick = ()=>{ save('ss_attendance', attendance); alert('Saved for ' + new Date().toISOString().slice(0,10)); updateAfterChange(); };
+  document.getElementById('clearAtt').onclick = ()=>{ if(!confirm('Clear today?')) return; attendance[new Date().toISOString().slice(0,10)]={}; save('ss_attendance',attendance); updateAfterChange(); };
+  document.getElementById('exportCSV').onclick = exportCSV;
+}
+
+/* Homework */
+function renderHomework(){
+  content.innerHTML = `<div class="card"><h2>Homework</h2><p class="small">Add assignment for students (demo).</p>
+    <div class="row" style="margin-top:8px"><input id="hwTitle" class="input" placeholder="Title e.g., Math Ch2"></div>
+    <div class="row" style="margin-top:8px"><input id="hwDue" class="small-input" placeholder="Due e.g., 10 Nov"><button class="btn" id="addHwBtn">Add</button></div>
+    <div style="margin-top:12px"><table><thead><tr><th>Title</th><th>Due</th><th>Submitted</th><th>Action</th></tr></thead><tbody id="hwBody"></tbody></table></div></div>`;
+  document.getElementById('addHwBtn').onclick = ()=>{ const t=document.getElementById('hwTitle').value.trim(); const d=document.getElementById('hwDue').value.trim(); if(!t) return alert('Enter title'); homework.push({title:t,due:d,submitted:[]}); save('ss_homework',homework); renderHomework(); updateAfterChange(); };
+  const hb=document.getElementById('hwBody'); hb.innerHTML=''; homework.forEach((h,i)=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${h.title}</td><td>${h.due||'--'}</td><td>${h.submitted.length}/${students.length}</td><td><button class="btn" onclick="toggleSubmit(${i})">Toggle</button> <button style="background:#c33" class="btn" onclick="removeHW(${i})">Remove</button></td>`; hb.appendChild(tr); });
+}
+
+/* Students */
+function renderStudents(){
+  content.innerHTML = `<div class="card"><h2>Students</h2><p class="small">Add or remove students.</p><div style="display:flex;gap:8px;margin-top:8px"><input id="stuName" class="input" placeholder="Name"><input id="stuRoll" class="small-input" placeholder="Roll"><button class="btn" id="addStuBtn">Add</button></div><div style="margin-top:12px"><table><thead><tr><th>Name</th><th>Roll</th><th>Action</th></tr></thead><tbody id="stuBody"></tbody></table></div></div>`;
+  document.getElementById('addStuBtn').onclick = ()=>{ const n=document.getElementById('stuName').value.trim(); const r=document.getElementById('stuRoll').value.trim(); if(!n||!r) return alert('Enter name & roll'); students.push({name:n,roll:r}); save('ss_students',students); renderStudents(); updateAfterChange(); };
+  const sb=document.getElementById('stuBody'); sb.innerHTML=''; students.forEach((s,i)=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${s.name}</td><td>${s.roll}</td><td><button class="btn" onclick="delStudent(${i})" style="background:#c33">Delete</button></td>`; sb.appendChild(tr); });
+}
+
+/* actions */
+function mark(roll,status){ const date=new Date().toISOString().slice(0,10); attendance[date]=attendance[date]||{}; attendance[date][roll]=status==='present'?'present':'absent'; save('ss_attendance',attendance); renderAttendance(); updateAfterChange(); }
+function toggleSubmit(i){ if(!homework[i]) return; const s = students.length? students[0].roll:'1'; const idx=homework[i].submitted.indexOf(s); if(idx>=0) homework[i].submitted.splice(idx,1); else homework[i].submitted.push(s); save('ss_homework',homework); renderHomework(); updateAfterChange(); }
+function removeHW(i){ if(!confirm('Remove?')) return; homework.splice(i,1); save('ss_homework',homework); renderHomework(); updateAfterChange(); }
+function delStudent(i){ if(!confirm('Delete?')) return; students.splice(i,1); save('ss_students',students); renderStudents(); updateAfterChange(); }
+function exportCSV(){ const date=new Date().toISOString().slice(0,10); const rows=['Name,Roll,Status']; students.forEach(s=>{ const st=(attendance[date]||{})[s.roll]||'absent'; rows.push(`${s.name},${s.roll},${st}`); }); const blob=new Blob([rows.join('\n')],{type:'text/csv'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='attendance_'+date+'.csv'; a.click(); }
+
+/* update dashboard etc */
+function updateAfterChange(){ save('ss_students',students); save('ss_attendance',attendance); save('ss_homework',homework); renderDashboard(); }
+
+/* logout */
+function logout(){ if(!confirm('Logout?')) return; loggedUser=null; save('ta_session',null); showLoginArea(); renderLogin('Logged out'); }
+
+/* init */
+showLoginArea();
+if(loggedUser){ showView('dashboard'); document.getElementById('bottomNav').style.display=''; } else { renderLogin(); }
+
+/* make some functions global for inline buttons used */
+window.mark = mark; window.toggleSubmit = toggleSubmit; window.removeHW = removeHW; window.delStudent = delStudent; window.exportCSV = exportCSV; window.renderLogin = renderLogin; window.renderSignup = renderSignup; window.logout = logout;
+</script>
+</body>
+</html>
